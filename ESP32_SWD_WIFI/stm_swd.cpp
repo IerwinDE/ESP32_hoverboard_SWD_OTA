@@ -38,7 +38,6 @@ bool STM32Flash::flash(uint8_t* buffer, size_t bufferSize)
   int maxretry = MAX_RETRIES;
   // write in haldf word steps
   for (size_t i = 0; i < bufferSize; i += 2) {
-    maxretry=MAX_RETRIES;
     waitbusy();
     writePG1();
     uint16_t data = *((uint16_t*)(buffer + i)); 
@@ -47,21 +46,22 @@ bool STM32Flash::flash(uint8_t* buffer, size_t bufferSize)
     uint16_t temp;
     memLoadHalf(FLASH_OFFSET + i, temp);
     if (temp != data) {
-        maxretry--;
         handleFault();
         Serial.println("verify failed at 0x" + String(FLASH_OFFSET + i) + ". expected: 0x" + String(data, HEX) + " read: 0x" + String(temp, HEX) + " retrying");
         i -= 2;
         uint32_t status = checkStatusAndConfirm();
         if (status != 0x20 && status != 0x24) { //if its not just an EOP or PGERR error, reconnect
+            Serial.println("FLASH_SR: 0x" +String(status, HEX)+ " reconnecting");
             connect();
             open_flash();
         }
-        if(maxretry--<=0){
+        if((maxretry--)<=0){
           lastError="to many retries. aborting";
           Serial.println(lastError);
           return false;
         }
     } else {
+        maxretry=MAX_RETRIES;
         totalWrittenBytes += 2;
     }
   }
@@ -88,7 +88,7 @@ uint32_t STM32Flash::checkStatusAndConfirm(){
 bool STM32Flash::waitbusy(unsigned long waitTime){ //wait for busy flag to reset. Will return false if a timeout occured
   long timeout = millis();
   uint32_t temp;
-  while(temp & 0x01 != 0){
+  while((temp & 0x01) != 0){
     if(!memLoad(FLASH_SR, temp)){
       temp=0xFF; //invalidate if read failed
     }
@@ -106,14 +106,13 @@ bool STM32Flash::open_flash()
   //open flash for writing
   uint32_t temp;
   Serial.println("opening flash");
-  temp = checkStatusAndConfirm();
   memStore(0x40022004, 0x45670123); //KEY 1
   memStore(0x40022004, 0xCDEF89AB); //KEY 1 
-  temp = checkStatusAndConfirm();
-  if( temp == 0 ) {
+  memLoad(FLASH_CR, temp);
+   if( (temp & 0x80) == 0 ) {
     Serial.println("flash has been opened");
   }else{
-    lastError="flash could not be opened";
+    lastError="flash could not be opened. FLASH_CR: 0x" + String(temp, HEX) + " expected: 0x0";
     Serial.println(lastError);
     return false;
   }
