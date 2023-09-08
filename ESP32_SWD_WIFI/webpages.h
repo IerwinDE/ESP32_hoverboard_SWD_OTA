@@ -15,24 +15,15 @@ const char index_html_template[] PROGMEM = R"rawliteral(
       display: inline-block;
       border: 1px solid #ccc;
       padding: 10px;
-      margin-right: 10px;
       text-align: left;
-      min-height: 120px;
-      min-width: 200px;
     }
     .board-title {
-      float: none;
+      float: left;
       font-weight: bold;
     }
     .param-label {
       float:left;
-      width: 110px;
-      padding-left: 0px;
-    }
-    .param-unlock {
-      float:left;
-      width: 100px;
-      padding-top: 5px;
+      width: 150px;
       padding-left: 0px;
     }
     .error {
@@ -48,8 +39,7 @@ const char index_html_template[] PROGMEM = R"rawliteral(
   
 
 <div class="board-container" id="mainboardAContainer">
-  <input type="radio" name="board" id="mainboardA" value="A" checked><span class="board-title">Mainboard A</span>
-  <br>
+  <span class="board-title"><input type="radio" name="board" id="mainboardA" value="A" checked> Mainboard A</span><br>
   <span class="param-label">Device Name:</span> <span id="deviceNameA"></span><br>
   <span class="param-label">Device ID:</span> <span id="deviceIDA"></span><br>
   <span class="param-label">Flash Size:</span> <span id="flashSizeA"></span><br>
@@ -57,8 +47,7 @@ const char index_html_template[] PROGMEM = R"rawliteral(
 </div>
 
 <div class="board-container" id="mainboardBContainer">
-  <input type="radio" name="board" id="mainboardB" value="B"><span class="board-title">Mainboard B</span></span>
-  <br>
+  <span class="board-title"><input type="radio" name="board" id="mainboardB" value="B"> Mainboard B</span></span><br>
   <span class="param-label">Device Name:</span> <span id="deviceNameB"></span><br>
   <span class="param-label">Device ID:</span> <span id="deviceIDB"></span><br>
   <span class="param-label">Flash Size:</span> <span id="flashSizeB"></span><br>
@@ -128,7 +117,7 @@ const char index_html_template[] PROGMEM = R"rawliteral(
         document.getElementById("mainboardB").style.display = "none"; 
       } else {
         document.getElementById("mainboardAContainer").style.display = "inline-block"; 
-        document.getElementById("mainboardB").style.display = "block"; 
+        document.getElementById("mainboardB").style.display = "inline-block"; 
       }
 
       if (data.mainboardA && data.mainboardB.status === "") {
@@ -137,7 +126,7 @@ const char index_html_template[] PROGMEM = R"rawliteral(
         document.getElementById("mainboardA").style.display = "none"; 
       } else {
         document.getElementById("mainboardBContainer").style.display = "inline-block"; 
-        document.getElementById("mainboardA").style.display = "block"; 
+        document.getElementById("mainboardA").style.display = "inline-block"; 
       }
 
       _("progressBar2").value = data.progress;

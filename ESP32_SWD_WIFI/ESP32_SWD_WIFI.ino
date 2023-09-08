@@ -65,6 +65,7 @@ void loop()
   switch(flashTask){
     case 1: //flash board A
       lastTask=1;
+      flasherA->debugHalt();
       if(flasherA->isLocked()){
         flasherA->removeReadProtection();
       }
@@ -73,6 +74,7 @@ void loop()
       flashTask=0;
     break;
     case 2: //flash board B
+      flasherA->debugHalt();
       lastTask=2;
       if(flasherB->isLocked()){
         flasherB->removeReadProtection();
