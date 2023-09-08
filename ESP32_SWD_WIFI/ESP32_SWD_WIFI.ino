@@ -14,14 +14,13 @@
 
 AsyncWebServer *server;               // initialise webserver
 String errorMessage = "";     // error message to display on webpage
-static bool flashTask=false;
+static int flashTask, lastTask=0;
 static uint8_t buffer[35000]; //large enough to hold the entire binary
 static size_t bufferSize = 0;
 static size_t bufferPos = 0;
-unsigned swd_clock_pin = swd_clock_pin_A;
-unsigned swd_data_pin = swd_data_pin_A;
 static String index_html = index_html_template;
-STM32Flash *flasher;
+STM32Flash *flasherA;
+STM32Flash *flasherB;
      
 
 void setup()
@@ -55,16 +54,36 @@ void setup()
   configureWebServer();
   server->begin();
 
+
+  flasherA = new STM32Flash(swd_clock_pin_A, swd_data_pin_A, ARMDebug::LOG_NONE);
+  flasherB = new STM32Flash(swd_clock_pin_B, swd_data_pin_B, ARMDebug::LOG_NONE);
 }
 
 void loop()
 {
   ArduinoOTA.handle();
-  if(flashTask){
-    flasher = new STM32Flash(swd_clock_pin, swd_data_pin, ARMDebug::LOG_NONE);
-    flasher->flash(buffer, bufferSize);
-    flashTask=false;
+  switch(flashTask){
+    case 1: //flash board A
+      lastTask=1;
+      flasherA->flash(buffer, bufferSize);
+      flasherA->reset();
+      flashTask=0;
+    break;
+    case 2: //flash board B
+      lastTask=2;
+      flasherB->flash(buffer, bufferSize);
+      flasherB->reset();
+      flashTask=0;
+    break;
+    case 0: //dont flash, refresh status and sleep
+      flasherA->connect();
+      flasherB->connect();
+      delay(1000);
+    break;
+    
+    
   }
+
 }
 
 unsigned long hstol(String recv)
@@ -106,27 +125,101 @@ void configureWebServer() {
       if (boardParam) {
           String boardValue = boardParam->value();
           if (boardValue == String("A")) {
-            Serial.println("using A Pins");
-            swd_clock_pin = int(swd_clock_pin_A);
-            swd_data_pin = int(swd_data_pin_A);
+                 flashTask = 1;
           } else {
-            Serial.println("using B Pins");
-            swd_clock_pin = int(swd_clock_pin_B);
-            swd_data_pin = int(swd_data_pin_B);
+                 flashTask = 2;
           }
-           Serial.println("swd on pins: " + String(swd_clock_pin) + " " + String(swd_data_pin));
+        
       }
-      //connect and flash
-
-      flashTask = true;
-      
-
-     
+      //connect and flash    
   },handleUpload);
 
-  server->on("/readProgress", HTTP_GET, [](AsyncWebServerRequest * request) {
-    handleProgress(request);
+  server->on("/unlock", HTTP_POST, [](AsyncWebServerRequest * request) {
+    Serial.println("unlock");
+    AsyncWebParameter* boardParam = request->getParam("board", true);
+      if (boardParam) {
+          String boardValue = boardParam->value();
+          if (boardValue == String("A")) {
+                 flasherA->removeReadProtection();
+          } else {
+                 flasherB->removeReadProtection();
+          } 
+      }
   });
+ 
+
+  server->on("/getDataFromServer", HTTP_GET, [](AsyncWebServerRequest *request){
+  // Schrittweise JSON-Erstellung für beide Mainboards
+  String jsonData = "{";
+  
+  // Daten für Mainboard A
+  jsonData += "\"mainboardA\": {";
+  jsonData += "\"deviceName\": \"" + flasherA->getDeviceName() + "\", ";
+  jsonData += "\"deviceID\": \"" + flasherA->getDeviceId() + "\", ";
+  jsonData += "\"flashSize\": \"" + String(flasherA->getFlashSize()) + "KBytes\", ";
+  if(flasherA->isConnected()){
+    if(flasherA->isLocked()){
+      jsonData += "\"flashSize\": \"unknown\", ";
+      jsonData += "\"status\": \"locked\"";
+    } else {
+      jsonData += "\"flashSize\": \"" + String(flasherA->getFlashSize()) + "KBytes\", ";
+      jsonData += "\"status\": \"unlocked\"";
+    }
+  } else {
+    jsonData += "\"status\": \"\"";
+  }
+
+  jsonData += "}, ";
+  
+  // Daten für Mainboard B
+  jsonData += "\"mainboardB\": {";
+  jsonData += "\"deviceName\": \"" + flasherB->getDeviceName() + "\", ";
+  jsonData += "\"deviceID\": \"" + flasherB->getDeviceId() + "\", ";
+  if(flasherB->isConnected()){
+    if(flasherB->isLocked()){
+      jsonData += "\"flashSize\": \"unknown\", ";
+      jsonData += "\"status\": \"locked\"";
+    } else {
+      jsonData += "\"flashSize\": \"" + String(flasherB->getFlashSize()) + "KBytes\", ";
+      jsonData += "\"status\": \"unlocked\"";
+    }
+  } else {
+    jsonData += "\"status\": \"\"";
+  }
+    jsonData += "}, ";
+
+    //Serial.println("handleProgress "+String(bufferSize)+" "+String(bufferPos)+" "+String(flasherA->getTotalWrittenBytes())+" "+String(flasherB->getTotalWrittenBytes())+" "+String(lastTask)+"\n");
+ 
+    String value = "0";
+    if(bufferSize>0){
+      switch (lastTask)
+      {
+      case 1:
+    
+        value = String(int((float(flasherA->getTotalWrittenBytes()) / float(bufferSize)) * 100));
+        break;
+      
+      case 2:
+        value = String(int((float(flasherB->getTotalWrittenBytes()) / float(bufferSize)) * 100));
+        break;
+      }
+    }
+
+
+    jsonData += "\"progress\": \"" + value + "\"";
+
+    if(!flasherA->isConnected() && !flasherB->isConnected()){
+      jsonData += ", \"error\": \"No mainboard connected\"";
+    } else {
+      jsonData += ", \"error\": \"" + errorMessage + "\"";
+    }
+
+    
+
+    jsonData += "}";
+
+    request->send(200, "application/json", jsonData);
+    });
 }
 
 void notFound(AsyncWebServerRequest *request) {
@@ -138,37 +231,34 @@ void notFound(AsyncWebServerRequest *request) {
 
 // handles upload and writes to flash
 void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-    if (!index) {
-      Serial.println("starting upload");
-      bufferPos=0;
-      bufferSize=0;
-    }
+    if(flashTask!=0){
+        errorMessage = "Flash task already running";
+        Serial.println(errorMessage);
+        return;
+    }else {
+      
+      if (!index) {
+        
+          Serial.println("starting upload");
+          bufferPos=0;
+          bufferSize=0;
+        }
+      
 
-    if (len) {
-      // Copy data to the buffer
-      for (size_t i = 0; i < len; i++) {
-        buffer[bufferPos++] = data[i];
+      if (len) {
+        // Copy data to the buffer
+        for (size_t i = 0; i < len; i++) {
+          buffer[bufferPos++] = data[i];
+        }
+
       }
 
+      if (final) {
+        bufferSize = index + len;
+        Serial.println("upload complete, starting flash task"); 
+        request->redirect("/");    
+      }
     }
-
-    if (final) {
-    bufferSize = index + len;
-    Serial.println("upload complete, starting flash task"); 
-    request->redirect("/");    
-}
   
 }
 
-
-void handleProgress(AsyncWebServerRequest *request){
- 
- String value = "0";
- if(bufferSize>0){
-  value = String(int((float(flasher->getTotalWrittenBytes()) / float(bufferSize)) * 100));
- }
- //Serial.printf("BufferSize: %i, BufferPos: %i, TotalWrittenBytes: %i, Percent: %s\n", bufferSize, bufferPos, totalWrittenBytes, value);
- 
- request->send(200, "text/plane", value); //Send flash progress value only to client ajax request
- 
-}

@@ -2,33 +2,64 @@
 #include "defines.h"
 #include "stm_swd.h"
 #include <arm_debug.h>
+#include <mutex>
 
 
+std::mutex mtx;
 
 STM32Flash::STM32Flash(unsigned clockPin, unsigned dataPin, LogLevel logLevel)
     : ARMDebug(clockPin, dataPin, logLevel)
 {}
 
 bool STM32Flash::connect(){
+  std::lock_guard<std::mutex> lock(mtx);
+  lastError="";
   //open SWD Connection
   bool begin = ARMDebug::begin();
   if(!begin){
     lastError="SWD connection failed";
     Serial.println(lastError);
+    connected=false;
     return false;
   } else {
     Serial.println("SWD connection established");
+    readDetails();
+    connected=true;
     return true;
   }
+}
+
+String getNameForId(uint32_t id){
+  switch (id)
+  {
+  case 0x414:
+    return "STM32F10xx";
+    break;
   
+  default:
+    return "unknown";
+    break;
+  }
+}
+
+void STM32Flash::readDetails(){
+  uint32_t temp;
+  memLoad(0xE0042000, temp);
+  deviceId="0x" + String(temp  & 0x00000FFF, HEX);
+  deviceName=getNameForId(temp  & 0x00000FFF);
+  memLoad(0x1FFFF7E0, temp);
+  flashSize=temp & 0x00000FFF;
+  memLoad(FLASH_OBR, temp);  
+  locked = ((temp & 0x2) != 0);
+  Serial.println("device id: " + deviceId + " name: " + deviceName + " flash size: " + String(flashSize) + " locked: " + String(locked));
 }
 
 bool STM32Flash::flash(uint8_t* buffer, size_t bufferSize)
 {
+  Serial.println("flashing " + String(bufferSize) + " bytes");
+  std::lock_guard<std::mutex> lock(mtx);
+  long time = millis();
   totalWrittenBytes = 0;
-  if(!connect()){
-    return false;
-  };
   if(!open_flash()){
     return false;
   };
@@ -44,10 +75,15 @@ bool STM32Flash::flash(uint8_t* buffer, size_t bufferSize)
     memStoreHalf(FLASH_OFFSET + i, data); 
     waitbusy();
     uint16_t temp;
-    memLoadHalf(FLASH_OFFSET + i, temp);
+    int readRetry= 2;
+    while( !memLoadHalf(FLASH_OFFSET + i, temp) && (readRetry--)>0){
+       Serial.println("retrying verification");
+    }
     if (temp != data) {
         handleFault();
-        Serial.println("verify failed at 0x" + String(FLASH_OFFSET + i) + ". expected: 0x" + String(data, HEX) + " read: 0x" + String(temp, HEX) + " retrying");
+        Serial.println("verify failed at 0x" + String(FLASH_OFFSET + i) + ". expected: 0x" + String(data, HEX) + " read: 0x" + String(temp, HEX) + " retrying ");
+        
+        
         i -= 2;
         uint32_t status = checkStatusAndConfirm();
         if (status != 0x20 && status != 0x24) { //if its not just an EOP or PGERR error, reconnect
@@ -65,7 +101,7 @@ bool STM32Flash::flash(uint8_t* buffer, size_t bufferSize)
         totalWrittenBytes += 2;
     }
   }
-  Serial.println("flahing complete");
+  Serial.println("flahing complete. took " + String((millis() - time)/1000) + "s.");
   return true;
 }
 
@@ -87,7 +123,7 @@ uint32_t STM32Flash::checkStatusAndConfirm(){
 
 bool STM32Flash::waitbusy(unsigned long waitTime){ //wait for busy flag to reset. Will return false if a timeout occured
   long timeout = millis();
-  uint32_t temp;
+  uint32_t temp = 0x01;
   while((temp & 0x01) != 0){
     if(!memLoad(FLASH_SR, temp)){
       temp=0xFF; //invalidate if read failed
@@ -97,6 +133,7 @@ bool STM32Flash::waitbusy(unsigned long waitTime){ //wait for busy flag to reset
       return false;
     }
   }
+  delayMicroseconds(2);
   return true;
 }
 
@@ -106,10 +143,10 @@ bool STM32Flash::open_flash()
   //open flash for writing
   uint32_t temp;
   Serial.println("opening flash");
-  memStore(0x40022004, 0x45670123); //KEY 1
-  memStore(0x40022004, 0xCDEF89AB); //KEY 1 
+  memStore(FLASH_KEYR, FLASH_KEY1); //KEY 1
+  memStore(FLASH_KEYR, FLASH_KEY2); //KEY 1 
   memLoad(FLASH_CR, temp);
-   if( (temp & 0x80) == 0 ) {
+  if( (temp & 0x80) == 0 ) {
     Serial.println("flash has been opened");
   }else{
     lastError="flash could not be opened. FLASH_CR: 0x" + String(temp, HEX) + " expected: 0x0";
@@ -122,7 +159,7 @@ bool STM32Flash::open_flash()
 
 bool STM32Flash::writePG1()
 {
-  return memStore(FLASH_CR, 0x01); //set PG bit
+ return memStore(FLASH_CR, 0x01); //set PG bit
 }
 
 
@@ -148,4 +185,82 @@ bool STM32Flash::erase_flash() //perform mass erase
 
 
 
+bool STM32Flash::reset(){
+    //erase the flash
+    uint32_t temp = 0;
+    Serial.println("resetting the STM");
+    memStore(0xe000ed0c, 0x5fa0004);
+    Serial.println("reset command sent");
+    return true;
+}
 
+
+bool STM32Flash::isConnected() //perform mass erase
+{
+  return connected;
+}
+
+bool STM32Flash::isLocked() //perform mass erase
+{
+  return locked;
+}
+
+String STM32Flash::getDeviceId(){
+  return deviceId;
+}
+
+String STM32Flash::getDeviceName(){
+  return deviceName;
+}
+
+size_t STM32Flash::getFlashSize(){
+  return flashSize;
+}
+
+size_t STM32Flash::getTotalWrittenBytes(){
+  return totalWrittenBytes;
+}
+
+bool STM32Flash::removeReadProtection(){
+  std::lock_guard<std::mutex> lock(mtx);
+  open_flash();
+  uint32_t temp;
+
+  //open option bytes
+  memStore(FLASH_OPTKEYR, FLASH_KEY1); //KEY 1
+  memStore(FLASH_OPTKEYR, FLASH_KEY2); //KEY 1 
+
+  //erase 
+  memLoad(FLASH_CR, temp);
+  memStore(FLASH_CR, temp | FLASH_CR_OPTER); //set OPTER bit
+  memStore(FLASH_CR, temp | FLASH_CR_OPTER | FLASH_CR_STRT); //set STRT bit
+  waitbusy();
+
+  memLoad(FLASH_SR, temp);
+  if((temp & 0x20) != 0){
+    Serial.println("Erase Opeation on Optionbytes successful");
+    memStore(FLASH_SR, temp | 0x20); //clear EOP bit
+  } else {
+    Serial.println("Erase Opeation on Optionbytes failed");
+    return false;
+  }
+  waitbusy(10000); //wait up to 10 Seconds for flash to erase
+  
+  //now we need to disable the write protection because clearing option bytes always restores the locked state
+  //disable opter bit/* Erase option bytes instruction */
+	memStore(FLASH_CR, FLASH_CR_OPTPG | FLASH_CR_OPTWRE);
+  memStoreHalf(FLASH_OBP_RDP, 0x00a5U);
+  waitbusy();
+  
+  memLoad(FLASH_SR, temp);
+  Serial.println("FLASH_SR: " + String(temp, HEX));
+  if((temp & 0x20) != 0){
+    Serial.println("Read protection removed");
+    memStore(FLASH_SR, temp | 0x20); //clear EOP bit
+  } else {
+    Serial.println("failed to remove read protection");
+    return false;
+  }
+  reset();
+  return true;
+}
