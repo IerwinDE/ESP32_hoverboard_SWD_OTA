@@ -65,12 +65,18 @@ void loop()
   switch(flashTask){
     case 1: //flash board A
       lastTask=1;
+      if(flasherA->isLocked()){
+        flasherA->removeReadProtection();
+      }
       flasherA->flash(buffer, bufferSize);
       flasherA->reset();
       flashTask=0;
     break;
     case 2: //flash board B
       lastTask=2;
+      if(flasherB->isLocked()){
+        flasherB->removeReadProtection();
+      }
       flasherB->flash(buffer, bufferSize);
       flasherB->reset();
       flashTask=0;
@@ -134,19 +140,6 @@ void configureWebServer() {
       //connect and flash    
   },handleUpload);
 
-  server->on("/unlock", HTTP_POST, [](AsyncWebServerRequest * request) {
-    Serial.println("unlock");
-    AsyncWebParameter* boardParam = request->getParam("board", true);
-      if (boardParam) {
-          String boardValue = boardParam->value();
-          if (boardValue == String("A")) {
-                 flasherA->removeReadProtection();
-          } else {
-                 flasherB->removeReadProtection();
-          } 
-      }
-  });
- 
 
   server->on("/getDataFromServer", HTTP_GET, [](AsyncWebServerRequest *request){
   // Schrittweise JSON-Erstellung für beide Mainboards

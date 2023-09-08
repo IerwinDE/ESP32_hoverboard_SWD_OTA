@@ -11,9 +11,6 @@ But it flashes and it makes things with wheels go fast, so YEY!
 
 
 //TODO:
-- implement proper error handling and give error messages to the gui
-- return status messages to the gui
-- auto detect connected mainboards
-- add option to unlock boards if the read protection is active
+- prevent the boards from turning off while connected due to timeout or voltage check
 - make proper headers in all sourcecode files
 - add a Link so people can buy me a coffee :P

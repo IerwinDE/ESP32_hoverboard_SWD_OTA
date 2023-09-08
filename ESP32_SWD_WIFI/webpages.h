@@ -54,7 +54,6 @@ const char index_html_template[] PROGMEM = R"rawliteral(
   <span class="param-label">Device ID:</span> <span id="deviceIDA"></span><br>
   <span class="param-label">Flash Size:</span> <span id="flashSizeA"></span><br>
   <span class="param-label">Status:</span> <span id="statusA"></span><br>
-  <span class="param-unlock"><button type="button" name="unlock" id="unlockA" style="display:none;" onclick="unlock()">unlock</button></span>
 </div>
 
 <div class="board-container" id="mainboardBContainer">
@@ -64,7 +63,6 @@ const char index_html_template[] PROGMEM = R"rawliteral(
   <span class="param-label">Device ID:</span> <span id="deviceIDB"></span><br>
   <span class="param-label">Flash Size:</span> <span id="flashSizeB"></span><br>
   <span class="param-label">Status:</span> <span id="statusB"></span><br>
-  <span class="param-unlock"><button type="button" name="unlock" id="unlockB" style="display:none;" onclick="unlock()">unlock</button></span>
 </div>
 <br>
 <span class="error" id="error"></span><br>
@@ -124,18 +122,6 @@ const char index_html_template[] PROGMEM = R"rawliteral(
       document.getElementById("flashSizeB").textContent = data.mainboardB.flashSize;
       document.getElementById("statusB").textContent = data.mainboardB.status;
 
-      if (data.mainboardA && data.mainboardA.status === "locked") {
-        document.getElementById("unlockA").style.display = "block"; // Zeigen Sie den Unlock-Button an
-      } else {
-        document.getElementById("unlockA").style.display = "none"; // Verbergen Sie den Unlock-Button
-      }
-
-      if (data.mainboardB && data.mainboardB.status === "locked") {
-        document.getElementById("unlockB").style.display = "block"; // Zeigen Sie den Unlock-Button an
-      } else {
-        document.getElementById("unlockB").style.display = "none"; // Verbergen Sie den Unlock-Button
-      }
-
       if (data.mainboardA && data.mainboardA.status === "") {
         document.getElementById("mainboardAContainer").style.display = "none"; 
         document.getElementById("mainboardB").checked = true;
@@ -177,7 +163,12 @@ const char index_html_template[] PROGMEM = R"rawliteral(
 
   
     function confirmAndFlash() {
-      if (confirm("Are you want to flash the selected file?")) {
+      var securityQuestion = "Are you want to flash the selected file?"
+      if ((document.querySelector('input[name="board"]:checked').value == "A" && _("statusA").innerHTML == "locked") || (document.querySelector('input[name="board"]:checked').value == "B" && _("statusB").innerHTML == "locked"))
+      {
+        securityQuestion = "\n\nYou are about to flash a read protected device, the original firmware will be overwritten and lost. Are you sure?";
+      } 
+      if (confirm(securityQuestion)) {
         var file = _("file1").files[0];
         var formdata = new FormData();
         formdata.append("file1", file);
@@ -188,17 +179,6 @@ const char index_html_template[] PROGMEM = R"rawliteral(
         ajax.addEventListener("error", errorHandler, false);
         ajax.addEventListener("abort", abortHandler, false);
         ajax.open("POST", "/");
-        ajax.send(formdata);
-      }
-    }
-
-
-    function unlock() {
-      if (confirm("Are you want to remove the read protection and DELETE the selected device? ALL DATA WILL BE LOST!")) {
-        var formdata = new FormData();
-        formdata.append("board", document.querySelector('input[name="board"]:checked').value);
-        var ajax = new XMLHttpRequest();
-        ajax.open("POST", "/unlock");
         ajax.send(formdata);
       }
     }
