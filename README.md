@@ -12,5 +12,6 @@ But it flashes and it makes things with wheels go fast, so YEY!
 
 //TODO:
 - prevent the boards from turning off while connected due to timeout or voltage check
+- Make it possible to have the ESP check a Server for available updates on each start and do hands-off-update (Pull vs push)
 - make proper headers in all sourcecode files
 - add a Link so people can buy me a coffee :P
